@@ -4,7 +4,7 @@ import {
   getAdminToken,
   isCorrectPassword,
   isValidAdminToken,
-} from '@/utils/adminAuth';
+} from '@/utils/supabase/adminAuth';
 
 export const runtime = 'nodejs';
 

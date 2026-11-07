@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { ADMIN_COOKIE, isValidAdminToken } from '@/utils/adminAuth';
+import { ADMIN_COOKIE, isValidAdminToken } from '@/utils/supabase/adminAuth';
 
 // نستخدم Service Role Key لتخطي قواعد الحماية (RLS) لأن هذا طلب من الأدمن
 const supabase = createClient(
