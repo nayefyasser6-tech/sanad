@@ -2,26 +2,37 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  body {
+    @apply bg-background text-slate-800 antialiased overflow-x-hidden;
   }
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
-}
-
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
+  .glass-panel {
+    @apply bg-surface backdrop-blur-md border border-white/60 shadow-sm rounded-2xl bg-glass-gradient;
+  }
+  
+  .btn-primary {
+    @apply bg-btn-gradient text-white font-bold py-3 px-6 rounded-xl shadow-orange-glow hover:opacity-90 hover:scale-105 transition-all duration-300;
+  }
+
+  /* حركة شريط الصور المستمرة (Marquee) */
+  .marquee-container {
+    overflow: hidden;
+    white-space: nowrap;
+    position: relative;
+    direction: ltr; 
+  }
+  .marquee-content {
+    display: inline-flex;
+    animation: marquee 35s linear infinite;
+  }
+  .marquee-content:hover {
+    animation-play-state: paused;
+  }
+  @keyframes marquee {
+    0% { transform: translateX(0%); }
+    100% { transform: translateX(-50%); }
   }
 }

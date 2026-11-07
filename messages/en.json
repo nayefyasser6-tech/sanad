@@ -1,0 +1,10 @@
+{
+  "Navigation": {
+    "home": "Home",
+    "buildBox": "Build Box",
+    "solarPanels": "Solar Panels",
+    "about": "About Us",
+    "contact": "Contact Us",
+    "myOrders": "My Orders"
+  }
+}
