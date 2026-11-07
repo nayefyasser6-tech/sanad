@@ -10,7 +10,7 @@ const supabase = createClient(
 export async function POST(request: Request) {
   try {
     // 1. التحقق الأمني من توقيع Lemon Squeezy
-    const bodyText = await request.text(); // يجب قراءة الجسم كنص للتحقق
+    const bodyText = await request.text();
     const signature = request.headers.get('x-signature');
     const secret = process.env.LEMON_SQUEEZY_WEBHOOK_SECRET;
 
@@ -29,14 +29,13 @@ export async function POST(request: Request) {
     // 2. تحليل البيانات واستخراج رقم الطلب
     const payload = JSON.parse(bodyText);
     const eventName = payload.meta.event_name;
-    const orderId = payload.meta.custom_data?.order_id; // استخراج الـ ID من custom_data
+    const orderId = payload.meta.custom_data?.order_id;
 
-    // التأكد من أن الحدث هو نجاح الدفع وأن رقم الطلب موجود
     if (eventName !== 'order_created' || !orderId) {
          return NextResponse.json({ message: 'تم تجاهل الحدث أو رقم الطلب مفقود' }, { status: 200 });
     }
 
-    // 3. تحديث حالة الطلب إلى مدفوع في Supabase
+    // 3. تحديث حالة الطلب إلى مدفوع وجلب بياناته
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .update({ status: 'paid' })
@@ -45,7 +44,12 @@ export async function POST(request: Request) {
       .maybeSingle(); 
 
     if (orderError || !order) {
-      return NextResponse.json({ error: 'الطلب غير موجود أو حدث خطأ في قاعدة البيانات' }, { status: 404 });
+      return NextResponse.json({ error: 'الطلب غير موجود أو حدث خطأ' }, { status: 404 });
+    }
+
+    // --- تفريغ السلة الخاصة بالمستخدم من قاعدة البيانات فور نجاح الدفع ---
+    if (order.user_id) {
+      await supabase.from('user_carts').delete().eq('user_id', order.user_id);
     }
 
     const targetCity = order.recipient_city; 
@@ -53,31 +57,38 @@ export async function POST(request: Request) {
        return NextResponse.json({ error: 'المدينة مفقودة في الطلب' }, { status: 400 });
     }
 
-    // جلب تفاصيل المنتجات المرتبطة بهذا الطلب من جدول order_items
+    // جلب تفاصيل المنتجات
     const { data: orderItems } = await supabase
       .from('order_items')
       .select('product_name, quantity, price')
       .eq('order_id', orderId);
 
-    // تنسيق قائمة المنتجات لعرضها في التيليجرام
+    // تنسيق قائمة المنتجات بشكل سليم (تم إصلاح خطأ الـ Syntax هنا)
     const itemsList = orderItems && orderItems.length > 0
-      ? orderItems.map((item) => `- ${item.product_name} (الكمية: ${item.quantity}) - \$${item.price}`).join('\n')
-      : '- تفاصيل المنتجات غير متوفرة';
+      ? orderItems.map((item) => `${item.product_name} (الكمية: ${item.quantity}) - $${item.price}`).join('\n')
+      : 'تفاصيل المنتجات غير متوفرة';
 
-    // 4. البحث عن التاجر في المدينة المطلوبة
+    // 4. البحث عن التاجر في المدينة المطلوبة (جلبنا حقل id للربط)
     const { data: merchant } = await supabase
       .from('merchants')
-      .select('telegram_chat_id, full_name')
+      .select('id, telegram_chat_id, full_name')
       .eq('city', targetCity)
       .eq('status', 'approved')
       .maybeSingle();
 
+    // --- الإضافة الحاسمة: ربط الطلب بالتاجر في قاعدة البيانات لكي يظهر في لوحته ---
+    if (merchant && merchant.id) {
+      await supabase
+        .from('orders')
+        .update({ merchant_id: merchant.id })
+        .eq('id', orderId);
+    }
+
     const telegramToken = process.env.TELEGRAM_BOT_TOKEN;
     const adminChatId = process.env.ADMIN_TELEGRAM_CHAT_ID;
 
-    // تجهيز الدالة المسؤولة عن إرسال رسائل التلغرام
     const sendTelegramMessage = async (chatId: string, text: string) => {
-      if (!chatId || !telegramToken) return; // التأكد من وجود التوكن
+      if (!chatId || !telegramToken) return;
       await fetch(`https://api.telegram.org/bot${telegramToken}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -85,11 +96,10 @@ export async function POST(request: Request) {
       });
     };
 
-    // تجهيز نص الرسالة الأساسي مع معلومات المستلم والمنتجات
     const baseMessage = `
 🛎️ *طلب جديد مدفوع!*
 ـــــــــــــــــــــــــــــــــــــــ
-*رقم الطلب:* #${orderId.slice(0, 8)}
+*رقم الطلب:* #${String(orderId).slice(0, 8)}
 *المدينة:* ${targetCity}
 *اسم المستلم:* ${order.recipient_name || 'غير متوفر'}
 *الهاتف:* ${order.recipient_phone || 'غير متوفر'}
@@ -100,16 +110,13 @@ export async function POST(request: Request) {
 ${itemsList}
 `;
 
-    // 5. إرسال الإشعار للتاجر (إذا كان موجوداً)
+    // 5. إرسال الإشعار للتاجر
     if (merchant && merchant.telegram_chat_id) {
-      await sendTelegramMessage(
-        merchant.telegram_chat_id, 
-        baseMessage + '\nيرجى الدخول للوحة التحكم لمراجعة التفاصيل والبدء بالتجهيز.'
-      );
+      await sendTelegramMessage(merchant.telegram_chat_id, baseMessage + '\nيرجى الدخول للوحة التحكم لمراجعة التفاصيل والبدء بالتجهيز.');
     }
 
     // 6. إرسال الإشعار للإدارة
-    if (adminChatId){ 
+    if (adminChatId) { 
       const adminNote = merchant 
         ? `\n👨‍💻 *نسخة للإدارة:* تم تحويل الطلب للتاجر (${merchant.full_name}).`
         : `\n⚠️ *تنبيه للإدارة:* لا يوجد تاجر معتمد أو مفعل لمدينة (${targetCity})!`;
@@ -117,7 +124,7 @@ ${itemsList}
       await sendTelegramMessage(adminChatId, baseMessage + adminNote);
     }
 
-    return NextResponse.json({ success: true, message: 'تم التحديث وإرسال الإشعارات بنجاح' });
+    return NextResponse.json({ success: true, message: 'تم التحديث بنجاح' });
 
   } catch (error) {
     console.error('Webhook Error:', error);
