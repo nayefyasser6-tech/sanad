@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { ADMIN_COOKIE, isValidAdminToken } from '@/utils/adminAuth';
 
 // نستخدم Service Role Key لتخطي قواعد الحماية (RLS) لأن هذا طلب من الأدمن
 const supabase = createClient(
@@ -96,8 +97,13 @@ async function translateToEnglish(name: string, description: string) {
   return null;
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
+    // فحص الصلاحية: فقط من أدخل كلمة مرور الأدمن
+    if (!isValidAdminToken(request.cookies.get(ADMIN_COOKIE)?.value)) {
+      return NextResponse.json({ error: 'غير مصرح' }, { status: 401 });
+    }
+
     const productData = await request.json();
 
     // نحاول الترجمة التلقائية
